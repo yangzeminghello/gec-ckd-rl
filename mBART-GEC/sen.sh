@@ -1,0 +1,14 @@
+SPM=/root/generic-pretrained-GEC-master/mBART-GEC/to/sentencepiece/build/src/spm_encode
+DATA=/root/generic-pretrained-GEC-master/mBART-GEC/data
+MODEL=/root/generic-pretrained-GEC-master/mBART-GEC/mbart/sentence.bpe.model
+TRAIN=train
+VALID=valid
+TEST=test
+SRC=src
+TGT=tgt
+${SPM} --model=${MODEL} < ${DATA}/${TRAIN}.${SRC} > ${DATA}/${TRAIN}.spm.${SRC} &
+${SPM} --model=${MODEL} < ${DATA}/${TRAIN}.${TGT} > ${DATA}/${TRAIN}.spm.${TGT} &
+${SPM} --model=${MODEL} < ${DATA}/${VALID}.${SRC} > ${DATA}/${VALID}.spm.${SRC} &
+${SPM} --model=${MODEL} < ${DATA}/${VALID}.${TGT} > ${DATA}/${VALID}.spm.${TGT} &
+${SPM} --model=${MODEL} < ${DATA}/${TEST}.${SRC} > ${DATA}/${TEST}.spm.${SRC} &
+${SPM} --model=${MODEL} < ${DATA}/${TEST}.${TGT} > ${DATA}/${TEST}.spm.${TGT} &
