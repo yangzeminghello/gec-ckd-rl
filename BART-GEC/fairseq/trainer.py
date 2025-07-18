@@ -267,7 +267,7 @@ class Trainer(object):
         )
 
     @metrics.aggregate("train")
-    def train_step(self, samples, dummy_batch=False, raise_oom=False):
+    def train_step(self, samples, samples_lm, t, dummy_batch=False, raise_oom=False):
         """Do forward, backward and parameter update."""
         if self._dummy_batch is None:
             self._dummy_batch = samples[0]
@@ -282,12 +282,20 @@ class Trainer(object):
 
         # forward and backward pass
         logging_outputs, sample_size, ooms = [], 0, 0
-        for i, sample in enumerate(samples):
+        
+        is_first = 0
+        
+        for i, (sample, sample_lm) in enumerate(zip(samples, samples_lm)):
+        
+        
             sample = self._prepare_sample(sample)
+            sample_lm = self._prepare_sample(sample_lm) 
+            
             if sample is None:
                 # when sample is None, run forward/backward on a dummy batch
                 # and ignore the resulting gradients
                 sample = self._prepare_sample(self._dummy_batch)
+                sample_lm = self._prepare_sample(self._dummy_batch)
                 ignore_grad = True
             else:
                 ignore_grad = False
@@ -311,7 +319,7 @@ class Trainer(object):
                 with maybe_no_sync():
                     # forward and backward
                     loss, sample_size_i, logging_output = self.task.train_step(
-                        sample, self.model, self.criterion, self.optimizer, ignore_grad
+                        sample, sample_lm, is_first, t, self.model, self.criterion, self.optimizer, ignore_grad
                     )
                     del loss
 
@@ -335,6 +343,7 @@ class Trainer(object):
                     self.zero_grad()
                 else:
                     raise e
+            is_first += 1
 
         if ooms > 0 and self._oom_batch is not None:
             self.handle_ooms(ooms)

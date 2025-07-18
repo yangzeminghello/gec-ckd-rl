@@ -271,7 +271,7 @@ class FairseqTask(object):
             search_strategy=search_strategy,
         )
 
-    def train_step(self, sample, model, criterion, optimizer, ignore_grad=False):
+    def train_step(self, sample, sample_lm, is_first,  t, model, criterion, optimizer, ignore_grad=False):
         """
         Do forward and backward, and return the loss as computed by *criterion*
         for the given *model* and *sample*.
@@ -292,7 +292,8 @@ class FairseqTask(object):
                 - logging outputs to display while training
         """
         model.train()
-        loss, sample_size, logging_output = criterion(model, sample)
+        
+        loss, sample_size, logging_output = criterion(model, sample, sample_lm, is_first,  t)
         if ignore_grad:
             loss *= 0
         optimizer.backward(loss)

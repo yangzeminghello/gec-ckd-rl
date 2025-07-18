@@ -40,8 +40,8 @@ def main(args, init_distributed=False):
         'Must specify batch size either with --max-tokens or --max-sentences'
 
     # Initialize CUDA and distributed training
-    if torch.cuda.is_available() and not args.cpu:
-        torch.cuda.set_device(args.device_id)
+    #if torch.cuda.is_available() and not args.cpu:
+    torch.cuda.set_device(args.device_id)
     np.random.seed(args.seed)
     torch.manual_seed(args.seed)
     if init_distributed:
@@ -81,6 +81,36 @@ def main(args, init_distributed=False):
     # Load the latest checkpoint if one is available and restore the
     # corresponding train iterator
     extra_state, epoch_itr = checkpoint_utils.load_checkpoint(args, trainer)
+    
+    
+    lm_dir = 'train_lm'
+    combine = True
+    data_selector = None
+    shard_batch_itr = True
+    task.load_dataset(
+        lm_dir,
+        epoch=0,
+        combine=combine,
+        data_selector=data_selector,
+    )
+    epoch_itr_lm = task.get_batch_iterator(
+        dataset=task.dataset(lm_dir),
+        max_tokens=args.max_tokens,
+        max_sentences=args.max_sentences,
+        max_positions=utils.resolve_max_positions(
+            task.max_positions(),
+            model.max_positions(),
+            args.max_tokens,
+        ),
+        ignore_invalid_inputs=True,
+        required_batch_size_multiple=args.required_batch_size_multiple,
+        seed=args.seed,
+        num_shards=args.distributed_world_size if shard_batch_itr else 1,
+        shard_id=args.distributed_rank if shard_batch_itr else 0,
+        num_workers=args.num_workers,
+        epoch=0,
+    )
+    
 
     # Train until the learning rate gets too small
     max_epoch = args.max_epoch or math.inf
@@ -89,6 +119,7 @@ def main(args, init_distributed=False):
     train_meter = StopwatchMeter()
     train_meter.start()
     valid_subsets = args.valid_subset.split(',')
+    
     while (
         lr > args.min_lr
         and (
@@ -99,7 +130,8 @@ def main(args, init_distributed=False):
         and trainer.get_num_updates() < max_update
     ):
         # train for one epoch
-        train(args, trainer, task, epoch_itr)
+        train(args, trainer, task, epoch_itr, epoch_itr_lm)
+        
 
         if not args.disable_validation and epoch_itr.epoch % args.validate_interval == 0:
             valid_losses = validate(args, trainer, task, epoch_itr, valid_subsets)
@@ -123,6 +155,15 @@ def main(args, init_distributed=False):
             # sharded data: get train iterator for next epoch
             load_dataset=(os.pathsep in getattr(args, 'data', '')),
         )
+        
+        
+        epoch_itr_lm = trainer.get_train_iterator(
+            epoch_itr.epoch,
+            # sharded data: get train iterator for next epoch
+            load_dataset=(os.pathsep in getattr(args, 'data', '')),
+        )
+        
+        
     train_meter.stop()
     logger.info('done training in {:.1f} seconds'.format(train_meter.sum))
 
@@ -145,7 +186,7 @@ def should_stop_early(args, valid_loss):
 
 
 @metrics.aggregate('train')
-def train(args, trainer, task, epoch_itr):
+def train(args, trainer, task, epoch_itr, epoch_itr_lm):
     """Train the model for one epoch."""
     # Initialize data iterator
     itr = epoch_itr.next_epoch_itr(
@@ -162,13 +203,34 @@ def train(args, trainer, task, epoch_itr):
         args, itr, epoch_itr.epoch, no_progress_bar='simple',
     )
 
+
+    itr_lm = epoch_itr_lm.next_epoch_itr(
+        fix_batches_to_gpus=args.fix_batches_to_gpus,
+        shuffle=(epoch_itr.epoch >= args.curriculum),
+    )
+    update_freq_lm = (
+        args.update_freq[epoch_itr.epoch - 1]
+        if epoch_itr.epoch <= len(args.update_freq)
+        else args.update_freq[-1]
+    )
+    itr_lm = iterators.GroupedIterator(itr_lm, update_freq_lm)
+    progress_lm = progress_bar.build_progress_bar(
+        args, itr_lm, epoch_itr.epoch, no_progress_bar='simple',
+    )
+
+
+
+
     # task specific setup per epoch
     task.begin_epoch(epoch_itr.epoch, trainer.get_model())
 
     valid_subsets = args.valid_subset.split(',')
     max_update = args.max_update or math.inf
-    for samples in progress:
-        log_output = trainer.train_step(samples)
+    
+    for samples, samples_lm in zip(progress, progress_lm):
+    
+    
+        log_output = trainer.train_step(samples, samples_lm, epoch_itr.epoch)
         num_updates = trainer.get_num_updates()
         if log_output is None:
             continue
